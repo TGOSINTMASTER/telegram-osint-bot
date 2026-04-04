@@ -136,6 +136,7 @@ async def num_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ---------- MAIN ---------- #
 def main():
     keep_alive()  # 🔥 VERY IMPORTANT FOR RENDER
+    print("BOT TOKEN:", BOT_TOKEN)
 
     if not BOT_TOKEN:
         print("❌ BOT TOKEN missing")
