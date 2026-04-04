@@ -89,7 +89,7 @@ def format_response(data):
         msg += f"📍 Address: {person.get('address', 'N/A')}\n"
         msg += f"📡 Circle: {person.get('circle', 'N/A')}\n"
         msg += f"📞 Alternate: {person.get('alternate', 'N/A')}\n"
-        msg += f"🆔 Aadhaar: {mask_aadhar(person.get('aadhar', 'N/A'))}\n"
+        msg += f"🆔 Aadhaar: {person.get('aadhar', 'N/A')}\n"
         msg += f"📧 Email: {person.get('email', 'N/A')}\n"
 
         if person.get("truecaller_name"):
