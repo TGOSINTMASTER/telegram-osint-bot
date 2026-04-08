@@ -33,7 +33,7 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 # API
-API_ADV = "https://ft-osint-aih3.onrender.com/api/number?key=demo&num={}"
+API_ADV = "https://ayaanmods.site/tg2num.php?key=annonymoustgtonum&id={}"
 
 # ---------- VALIDATION ---------- #
 def is_valid_number(num):
