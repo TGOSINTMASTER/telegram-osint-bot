@@ -15,6 +15,24 @@ from telegram.ext import (
 from telegram.request import HTTPXRequest
 from telegram.error import Forbidden
 
+# 🔥 ADD FLASK (FOR RENDER FREE)
+from flask import Flask
+from threading import Thread
+
+app_flask = Flask(__name__)
+
+@app_flask.route('/')
+def home():
+    return "Bot is alive"
+
+def run():
+    port = int(os.environ.get("PORT", 10000))
+    app_flask.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    t = Thread(target=run)
+    t.start()
+
 # 🚀 CACHE
 cache = {}
 
@@ -160,6 +178,8 @@ async def num_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---------- MAIN ---------- #
 def main():
+    keep_alive()  # 🔥 IMPORTANT FOR RENDER FREE
+
     if not BOT_TOKEN:
         print("❌ BOT TOKEN missing")
         return
