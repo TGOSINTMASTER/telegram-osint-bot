@@ -1,8 +1,6 @@
 import os
 import httpx
 from dotenv import load_dotenv
-from flask import Flask
-from threading import Thread
 
 from telegram import (
     Update,
@@ -12,34 +10,16 @@ from telegram import (
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
-    ContextTypes,
-    CallbackQueryHandler
+    ContextTypes
 )
 from telegram.request import HTTPXRequest
+from telegram.error import Forbidden
 
-
-# 🚀 ADD THIS GLOBAL CACHE (TOP)
+# 🚀 CACHE
 cache = {}
 
-# 🔥 FORCE JOIN CHANNEL
-FORCE_CHANNELS = ["@zoraxgc"]
-
-# 🔥 KEEP ALIVE (Render)
-app_flask = Flask(__name__)
-
-@app_flask.route('/')
-def home():
-    return "Bot is alive"
-
-def run():
-    port = int(os.environ.get("PORT", 10000))
-    app_flask.run(host='0.0.0.0', port=port)
-
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
-
-# --------------------------- #
+# 🔥 YOUR GROUP (without @)
+GROUP_USERNAME = "zoraxgc"
 
 # Load env
 load_dotenv()
@@ -48,46 +28,20 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 # API
 API_ADV = "https://yash-code-with-ai.alphamovies.workers.dev/?num={}&key=7189814021"
 
+# ---------- SAFE REPLY ---------- #
+async def safe_reply(message, text, reply_markup=None):
+    try:
+        await message.reply_text(text, reply_markup=reply_markup)
+    except Forbidden:
+        print("User blocked bot")
+    except Exception as e:
+        print("Send error:", e)
+
 # ---------- VALIDATION ---------- #
 def is_valid_number(num):
     return num.isdigit() and len(num) == 10
 
-# ---------- JOIN CHECK ---------- #
-async def is_user_joined(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-
-    try:
-        for channel in FORCE_CHANNELS:
-            member = await context.bot.get_chat_member(channel, user_id)
-
-            if member.status not in ["member", "administrator", "creator"]:
-                return False
-
-        return True
-
-    except Exception as e:
-        print("Join check error:", e)
-        return False
-
-# ---------- JOIN BUTTON ---------- #
-def join_button():
-    keyboard = []
-
-    for channel in FORCE_CHANNELS:
-        keyboard.append([
-            InlineKeyboardButton(
-                f"🚀 Join {channel}",
-                url=f"https://t.me/{channel.replace('@','')}"
-            )
-        ])
-
-    keyboard.append([
-        InlineKeyboardButton("✅ I Joined", callback_data="check_join")
-    ])
-
-    return InlineKeyboardMarkup(keyboard)
-
-# ---------- API CALL (OPTIMIZED - REUSE CLIENT) ---------- #
+# ---------- API CLIENT ---------- #
 client = httpx.AsyncClient(timeout=20)
 
 async def fetch_data(number):
@@ -112,14 +66,12 @@ async def fetch_data(number):
 
 # ---------- FORMAT RESPONSE ---------- #
 def format_response(data):
-    # 🔥 Safety check
     if not isinstance(data, dict):
         return "⚠️ Invalid response from API."
 
     if "error" in data:
         return "⚠️ API is slow or failed. Try again."
 
-    # Convert dict → list
     results = list(data.values())
 
     if not results:
@@ -130,8 +82,6 @@ def format_response(data):
     msg = f"📱 NUMBER: {number}\n━━━━━━━━━━━━━━\n\n"
 
     for i, person in enumerate(results, 1):
-
-        # 🔥 Skip invalid entries
         if not isinstance(person, dict):
             continue
 
@@ -149,74 +99,71 @@ def format_response(data):
 
 # ---------- COMMAND: /start ---------- #
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await is_user_joined(update, context):
-        return await update.message.reply_text(
-            "🚫 Access Denied!\n\nJoin our channel to use this bot.",
-            reply_markup=join_button()
+
+    # ❌ PRIVATE → REDIRECT TO GROUP
+    if update.effective_chat.type == "private":
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🚀 Open Group", url=f"https://t.me/{GROUP_USERNAME}")]
+        ])
+
+        return await safe_reply(
+            update.message,
+            "⚠️ This bot works only in group.\n\n👉 Click below to use it.",
+            reply_markup=keyboard
         )
 
-    await update.message.reply_text(
-        "🤖 OSINT Number Lookup Bot\n\nUse:\n/num 9876543210"
-    )
+    await safe_reply(update.message, "✅ Bot is ready. Use /num <number>")
 
 # ---------- COMMAND: /num ---------- #
 async def num_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        if not await is_user_joined(update, context):
-            return await update.message.reply_text(
-                "🚫 Join channel first!",
-                reply_markup=join_button()
+        # ❌ BLOCK PRIVATE
+        if update.effective_chat.type == "private":
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🚀 Open Group", url=f"https://t.me/{GROUP_USERNAME}")]
+            ])
+
+            return await safe_reply(
+                update.message,
+                "⚠️ Use this bot in group only!",
+                reply_markup=keyboard
             )
 
         if len(context.args) == 0:
-            return await update.message.reply_text("❌ Use: /num 9876543210")
+            return await safe_reply(update.message, "❌ Use: /num 9876543210")
 
         number = context.args[0]
 
         if not is_valid_number(number):
-            return await update.message.reply_text("❌ Invalid number")
+            return await safe_reply(update.message, "❌ Invalid number")
 
-        # ⚡ CACHE CHECK (INSTANT RESPONSE)
+        # ⚡ CACHE
         if number in cache:
-            return await update.message.reply_text(cache[number])
+            return await safe_reply(update.message, cache[number])
 
-        # ⚡ SINGLE MESSAGE (EDIT LATER)
         msg = await update.message.reply_text("🔍 Fetching...")
 
-        # ⚡ ASYNC CALL (FIXED)
         data = await fetch_data(number)
-
         result = format_response(data)
 
-        # ⚡ SAVE CACHE
+        # ⚠️ LIMIT CACHE
+        if len(cache) > 500:
+            cache.clear()
+
         cache[number] = result
 
-        # ⚡ EDIT MESSAGE (FASTER UX)
         await msg.edit_text(result)
 
     except Exception as e:
         print("Error:", e)
-        await update.message.reply_text("⚠️ Error occurred")
-
-# ---------- CALLBACK ---------- #
-async def check_join_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    if await is_user_joined(update, context):
-        await query.edit_message_text("✅ Verified! Use /num now.")
-    else:
-        await query.answer("❌ Still not joined!", show_alert=True)
+        await safe_reply(update.message, "⚠️ Error occurred")
 
 # ---------- MAIN ---------- #
 def main():
-    keep_alive()
-
     if not BOT_TOKEN:
         print("❌ BOT TOKEN missing")
         return
 
-    # 🔥 FIX TIMEOUT ISSUE
     request = HTTPXRequest(
         connect_timeout=30,
         read_timeout=30,
@@ -228,7 +175,6 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("num", num_command))
-    app.add_handler(CallbackQueryHandler(check_join_callback, pattern="check_join"))
 
     print("🤖 Bot running...")
     app.run_polling()
