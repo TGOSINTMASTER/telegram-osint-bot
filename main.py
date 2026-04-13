@@ -1,17 +1,30 @@
 import os
-import requests
+import httpx
 from dotenv import load_dotenv
-from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    ContextTypes
-)
-
-# 🔥 KEEP ALIVE (Render Fix)
 from flask import Flask
 from threading import Thread
 
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup
+)
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    ContextTypes,
+    CallbackQueryHandler
+)
+from telegram.request import HTTPXRequest
+
+
+# 🚀 ADD THIS GLOBAL CACHE (TOP)
+cache = {}
+
+# 🔥 FORCE JOIN CHANNEL
+FORCE_CHANNELS = ["@zoraxgc","@escrowzorax"]
+
+# 🔥 KEEP ALIVE (Render)
 app_flask = Flask(__name__)
 
 @app_flask.route('/')
@@ -19,7 +32,7 @@ def home():
     return "Bot is alive"
 
 def run():
-    port = int(os.environ.get("PORT", 10000))  # Render uses dynamic PORT
+    port = int(os.environ.get("PORT", 10000))
     app_flask.run(host='0.0.0.0', port=port)
 
 def keep_alive():
@@ -28,72 +41,107 @@ def keep_alive():
 
 # --------------------------- #
 
-# Load env (for local only)
+# Load env
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 # API
-API_ADV = "https://ayaanmods.site/tg2num.php?key=annonymoustgtonum&id={}"
+API_ADV = "https://yash-code-with-ai.alphamovies.workers.dev/?num={}&key=7189814021"
 
 # ---------- VALIDATION ---------- #
 def is_valid_number(num):
     return num.isdigit() and len(num) == 10
 
-# ---------- API CALL ---------- #
-def fetch_data(number):
+# ---------- JOIN CHECK ---------- #
+async def is_user_joined(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+
     try:
-        url = API_ADV.format(number)
-        print("\n🌐 API URL:", url)
+        for channel in FORCE_CHANNELS:
+            member = await context.bot.get_chat_member(channel, user_id)
 
-        res = requests.get(url, timeout=15)
-        print("📡 Status Code:", res.status_code)
+            if member.status not in ["member", "administrator", "creator"]:
+                return False
 
-        if res.status_code != 200:
-            return {"error": "API server error"}
-
-        return res.json()
+        return True
 
     except Exception as e:
-        print("❌ Exception:", e)
+        print("Join check error:", e)
+        return False
+
+# ---------- JOIN BUTTON ---------- #
+def join_button():
+    keyboard = []
+
+    for channel in FORCE_CHANNELS:
+        keyboard.append([
+            InlineKeyboardButton(
+                f"🚀 Join {channel}",
+                url=f"https://t.me/{channel.replace('@','')}"
+            )
+        ])
+
+    keyboard.append([
+        InlineKeyboardButton("✅ I Joined", callback_data="check_join")
+    ])
+
+    return InlineKeyboardMarkup(keyboard)
+
+# ---------- API CALL (OPTIMIZED - REUSE CLIENT) ---------- #
+client = httpx.AsyncClient(timeout=20)
+
+async def fetch_data(number):
+    url = API_ADV.format(number)
+
+    try:
+        res = await client.get(url)
+
+        if res.status_code != 200:
+            return {"error": "API error"}
+
+        data = res.json()
+
+        if not isinstance(data, dict):
+            return {"error": "Invalid response"}
+
+        return data
+
+    except Exception as e:
+        print("API Error:", e)
         return {"error": "Request failed"}
 
 # ---------- FORMAT RESPONSE ---------- #
-def mask_aadhar(aadhar):
-    if aadhar and len(aadhar) >= 8:
-        return aadhar[:4] + "****" + aadhar[-2:]
-    return aadhar
-
 def format_response(data):
-    if not data:
-        return "❌ No response from API."
+    # 🔥 Safety check
+    if not isinstance(data, dict):
+        return "⚠️ Invalid response from API."
 
-    if isinstance(data, dict) and data.get("status") == "error":
-        return f"❌ API Error: {data.get('message', 'Unknown')}"
+    if "error" in data:
+        return "⚠️ API is slow or failed. Try again."
 
-    if not data.get("success"):
-        return "❌ No valid data found."
-
-    number = data.get("number", "N/A")
-    results = data.get("results", [])
-
-    msg = f"📱 NUMBER: {number}\n"
-    msg += "━━━━━━━━━━━━━━\n\n"
+    # Convert dict → list
+    results = list(data.values())
 
     if not results:
-        return msg + "❌ No records found."
+        return "❌ No records found."
+
+    number = results[0].get("mobile", "N/A")
+
+    msg = f"📱 NUMBER: {number}\n━━━━━━━━━━━━━━\n\n"
 
     for i, person in enumerate(results, 1):
+
+        # 🔥 Skip invalid entries
+        if not isinstance(person, dict):
+            continue
+
         msg += f"🔎 Record {i}\n\n"
         msg += f"👤 Name: {person.get('name', 'N/A')}\n"
-        msg += f"👨 Father: {person.get('father_name', 'N/A')}\n"
+        msg += f"👨 Father: {person.get('fname', 'N/A')}\n"
         msg += f"📍 Address: {person.get('address', 'N/A')}\n"
         msg += f"📡 Circle: {person.get('circle', 'N/A')}\n"
-        msg += f"📞 Alternate: {person.get('alternate', 'N/A')}\n"
-        msg += f"🆔 Aadhaar: {person.get('aadhar', 'N/A')}\n"
+        msg += f"📞 Alternate: {person.get('alt', 'N/A')}\n"
         msg += f"📧 Email: {person.get('email', 'N/A')}\n"
-
-        if person.get("truecaller_name"):
-            msg += f"📲 Truecaller: {person.get('truecaller_name')}\n"
 
         msg += "\n━━━━━━━━━━━━━━\n\n"
 
@@ -101,51 +149,86 @@ def format_response(data):
 
 # ---------- COMMAND: /start ---------- #
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_user_joined(update, context):
+        return await update.message.reply_text(
+            "🚫 Access Denied!\n\nJoin our channel to use this bot.",
+            reply_markup=join_button()
+        )
+
     await update.message.reply_text(
-        "🤖 OSINT Number Lookup Bot\n\n"
-        "Use command:\n"
-        "👉 /num <10-digit-number>\n\n"
-        "Example:\n"
-        "/num 9876543210"
+        "🤖 OSINT Number Lookup Bot\n\nUse:\n/num 9876543210"
     )
 
 # ---------- COMMAND: /num ---------- #
 async def num_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        if len(context.args) == 0:
+        if not await is_user_joined(update, context):
             return await update.message.reply_text(
-                "❌ Usage: /num <10-digit-number>\nExample: /num 9876543210"
+                "🚫 Join channel first!",
+                reply_markup=join_button()
             )
+
+        if len(context.args) == 0:
+            return await update.message.reply_text("❌ Use: /num 9876543210")
 
         number = context.args[0]
 
         if not is_valid_number(number):
-            return await update.message.reply_text("❌ Enter valid 10-digit number")
+            return await update.message.reply_text("❌ Invalid number")
 
-        await update.message.reply_text("🔍 Fetching data...")
+        # ⚡ CACHE CHECK (INSTANT RESPONSE)
+        if number in cache:
+            return await update.message.reply_text(cache[number])
 
-        data = fetch_data(number)
+        # ⚡ SINGLE MESSAGE (EDIT LATER)
+        msg = await update.message.reply_text("🔍 Fetching...")
+
+        # ⚡ ASYNC CALL (FIXED)
+        data = await fetch_data(number)
+
         result = format_response(data)
 
-        await update.message.reply_text(result)
+        # ⚡ SAVE CACHE
+        cache[number] = result
+
+        # ⚡ EDIT MESSAGE (FASTER UX)
+        await msg.edit_text(result)
 
     except Exception as e:
-        print("❌ Error:", e)
-        await update.message.reply_text("⚠️ Something went wrong")
+        print("Error:", e)
+        await update.message.reply_text("⚠️ Error occurred")
+
+# ---------- CALLBACK ---------- #
+async def check_join_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    if await is_user_joined(update, context):
+        await query.edit_message_text("✅ Verified! Use /num now.")
+    else:
+        await query.answer("❌ Still not joined!", show_alert=True)
 
 # ---------- MAIN ---------- #
 def main():
-    keep_alive()  # 🔥 VERY IMPORTANT FOR RENDER
-    print("BOT TOKEN:", BOT_TOKEN)
+    keep_alive()
 
     if not BOT_TOKEN:
         print("❌ BOT TOKEN missing")
         return
 
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    # 🔥 FIX TIMEOUT ISSUE
+    request = HTTPXRequest(
+        connect_timeout=30,
+        read_timeout=30,
+        write_timeout=30,
+        pool_timeout=30
+    )
+
+    app = ApplicationBuilder().token(BOT_TOKEN).request(request).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("num", num_command))
+    app.add_handler(CallbackQueryHandler(check_join_callback, pattern="check_join"))
 
     print("🤖 Bot running...")
     app.run_polling()
