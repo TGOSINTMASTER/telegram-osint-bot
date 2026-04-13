@@ -22,7 +22,7 @@ from telegram.request import HTTPXRequest
 cache = {}
 
 # 🔥 FORCE JOIN CHANNEL
-FORCE_CHANNELS = ["@zoraxgc","@escrowzorax"]
+FORCE_CHANNELS = ["@zoraxgc"]
 
 # 🔥 KEEP ALIVE (Render)
 app_flask = Flask(__name__)
